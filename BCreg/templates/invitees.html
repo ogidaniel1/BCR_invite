@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Invitees</title>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <style>
+        .container {
+            margin-top: 20px;
+        }
+        header img {
+            max-width: 100px;
+            margin-bottom: 20px;
+        }
+        .table-container {
+            margin-top: 20px;
+        }
+        .pagination {
+            justify-content: center;
+        }
+        .qr-code {
+            width: 50px;
+            cursor: pointer;
+            display: inline-block;
+            vertical-align: middle;
+        }
+        .toggle-btn {
+            margin-left: 10px;
+            font-size: 0.8em;
+            padding: 2px 8px;
+        }
+    </style>
+    <script>
+        function toggleQrCode(inviteeId) {
+            const imgElement = document.getElementById(`qr-code-${inviteeId}`);
+            const isHidden = imgElement.classList.toggle('hidden');
+            if (!isHidden) {
+                fetch(`/get_qr_code/${inviteeId}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        imgElement.src = `data:image/png;base64,${data.qr_code_path}`;
+                    });
+            } else {
+                imgElement.src = "/static/images/default_qr_code.png"; // Default image path
+            }
+        }
+    </script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <img src="{{ url_for('static', filename='images/logo.png') }}" alt="Logo">
+        </header>
+        <h1>Invitees</h1>
+        <div class="table-container">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Name</th>
+                        <th>Phone Number</th>
+                        <th>Status</th>
+                        <th>QR Code</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for invitee in invitees %}
+                        <tr>
+                            <td>{{ invitee.id }}</td>
+                            <td>{{ invitee.name }}</td>
+                            <td>{{ invitee.phone_number }}</td>
+                            <td>{{ invitee.confirmed }}</td>
+                            <td>
+                                <img id="qr-code-{{ invitee.id }}" class="qr-code hidden" src="/static/images/default_qr_code.png" alt="QR Code">
+                                <button onclick="toggleQrCode('{{ invitee.id }}');" class="btn btn-primary toggle-btn">Toggle QR</button>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            <nav aria-label="Page navigation">
+                <ul class="pagination">
+                    {% if pagination.has_prev %}
+                        <li class="page-item">
+                            <a class="page-link" href="{{ url_for('invitees', page=pagination.prev_num) }}" aria-label="Previous">
+                                <span aria-hidden="true">&laquo;</span>
+                                <span class="sr-only">Previous</span>
+                            </a>
+                        </li>
+                    {% else %}
+                        <li class="page-item disabled">
+                            <a class="page-link" href="#" aria-label="Previous">
+                                <span aria-hidden="true">&laquo;</span>
+                                <span class="sr-only">Previous</span>
+                            </a>
+                        </li>
+                    {% endif %}
+                    {% for page_num in pagination.iter_pages() %}
+                        {% if page_num %}
+                            {% if page_num == pagination.page %}
+                                <li class="page-item active">
+                                    <a class="page-link" href="#">{{ page_num }} <span class="sr-only">(current)</span></a>
+                                </li>
+                            {% else %}
+                                <li class="page-item">
+                                    <a class="page-link" href="{{ url_for('invitees', page=page_num) }}">{{ page_num }}</a>
+                                </li>
+                            {% endif %}
+                        {% else %}
+                            <li class="page-item disabled"><a class="page-link" href="#">...</a></li>
+                        {% endif %}
+                    {% endfor %}
+                    {% if pagination.has_next %}
+                        <li class="page-item">
+                            <a class="page-link" href="{{ url_for('invitees', page=pagination.next_num) }}" aria-label="Next">
+                                <span aria-hidden="true">&raquo;</span>
+                                <span class="sr-only">Next</span>
+                            </a>
+                        </li>
+                    {% else %}
+                        <li class="page-item disabled">
+                            <a class="page-link" href="#" aria-label="Next">
+                                <span aria-hidden="true">&raquo;</span>
+                                <span class="sr-only">Next</span>
+                            </a>
+                        </li>
+                    {% endif %}
+                </ul>
+            </nav>
+        </div>
+    </div>
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.9.3/dist/umd/popper.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+</body>
+</html>

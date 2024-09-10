@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Registration Successful</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .container {
+            background: #fff;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            width: 300px;
+        }
+        header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        header img {
+            width: 100px; /* Adjust the size of the logo as needed */
+        }
+        h1 {
+            color: #28a745;
+        }
+        p {
+            color: #333;
+        }
+        img {
+            margin-top: 10px;
+            width: 100%; /* Make QR code image responsive */
+            max-width: 200px; /* Adjust as needed */
+        }
+        a {
+            display: inline-block;
+            margin-top: 15px;
+            padding: 10px 20px;
+            background-color: #28a745;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            transition: background-color 0.3s;
+        }
+        a:hover {
+            background-color: #218838;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <img src="{{ url_for('static', filename='images/logo.png') }}" alt="Logo"> <!-- Adjust the path as needed -->
+        </header>
+        <h1>Registration Successful!</h1>
+        <p>Your QR code:</p>
+        <p>Please Screenshot it</p>
+        <!-- <img src="{{ url_for('static', filename=qr_code_path.split('static/')[1]) }}" alt="Invitee QR Code"> -->
+        <img src="data:image/png;base64,{{ qr_code_path }}" alt="QR Code">
+        <br>
+        <a href="/register">Register Another Invitee</a>
+    </div>
+</body>
+</html>

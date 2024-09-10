@@ -1,0 +1,41 @@
+
+{% extends "base.html" %}
+
+{% block title %}NIGERIAN GRASSROOT LEADERSHIP MERIT AWARD{% endblock %}
+
+{% block content %}
+
+<body>
+    <div class="container">
+        <header>
+            <img src="{{ url_for('static', filename='images/logo.png') }}" alt="Logo"> <!-- Adjust the path as needed -->
+        </header>
+        <h1>Admin Login</h1>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                            <span aria-hidden="true">&times;</span>
+                        </button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        <form method="POST" action="{{ url_for('login') }}">
+            {{ form.hidden_tag() }}
+            <p>
+                {{ form.email.label }}<br>
+                {{ form.email(class_="form-control", size=32) }}
+            </p>
+            <p>
+                {{ form.password.label }}<br>
+                {{ form.password(class_="form-control", size=32) }}
+            </p>
+            <p>{{ form.submit(class_="btn btn-primary btn-block") }}</p>
+        </form>
+    </div>
+</body>
+</html>
+{% endblock %}

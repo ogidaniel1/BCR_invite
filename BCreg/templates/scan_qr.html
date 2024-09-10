@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scan QR Code</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f4f8;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .container {
+            background-color: #ffffff;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            width: 100%;
+            max-width: 600px;
+        }
+        h1 {
+            font-size: 24px;
+            color: #333333;
+            margin-bottom: 20px;
+        }
+        h4 {
+            font-size: 16px;
+            color: #555555;
+            margin-bottom: 20px;
+        }
+        a {
+            color: #007bff;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        video {
+            width: 100%;
+            max-width: 500px;
+            border-radius: 15px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        .message {
+            margin-top: 20px;
+            font-size: 18px;
+            color: #333333;
+        }
+        button {
+            margin-top: 20px;
+            padding: 10px 20px;
+            font-size: 16px;
+            color: #ffffff;
+            background-color: #007bff;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Scan QR Code</h1>
+        <h4>Tap to view all invitees: <a href="/invitees">Click</a></h4>
+        <video id="preview" autoplay></video>
+        <div id="message" class="message"></div>
+        <button id="refresh-button">Refresh Scanner</button>
+    </div>
+
+    <script src="https://rawgit.com/schmich/instascan-builds/master/instascan.min.js"></script>
+    <script type="text/javascript">
+        let scanner = new Instascan.Scanner({ video: document.getElementById('preview') });
+        let currentCamera = null;
+
+        function startScanner() {
+            Instascan.Camera.getCameras().then(function (cameras) {
+                if (cameras.length > 0) {
+                    if (currentCamera) {
+                        scanner.stop();
+                    }
+                    currentCamera = cameras[0];
+                    scanner.start(currentCamera);
+                } else {
+                    console.error('No cameras found.');
+                }
+            }).catch(function (e) {
+                console.error(e);
+            });
+        }
+
+        function stopScanner() {
+            if (currentCamera) {
+                scanner.stop();
+                currentCamera = null;
+            }
+        }
+
+        scanner.addListener('scan', function (content) {
+            fetch('/confirm_qr_code', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ qr_code_data: content })
+            })
+            .then(response => response.json())
+            .then(data => {
+                let messageElement = document.getElementById('message');
+                if (data.error) {
+                    messageElement.textContent = data.error;
+                    messageElement.style.color = 'red';
+                } else {
+                    messageElement.textContent = `Invitee: ${data.invitee.invitee_name}`;
+                    messageElement.style.color = 'green';
+                }
+            })
+            .catch((error) => {
+                console.error('Error:', error);
+            });
+        });
+
+        document.getElementById('refresh-button').addEventListener('click', function () {
+            stopScanner();
+            startScanner();
+        });
+
+        // Start scanning when the page loads
+        startScanner();
+    </script>
+</body>
+</html>
