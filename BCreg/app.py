@@ -158,8 +158,8 @@ def get_lgas():
 
 class InviteeForm(FlaskForm):
     name = StringField('Member Name', validators=[DataRequired(), Length(min=2, max=100)])
-    phone_number = StringField('Phone Number', validators=[DataRequired(), Length(max=11), Regexp(regex='^\d+$', message="Phone number must contain only digits")])
-     # State SelectField
+    phone_number = StringField('Phone Number', validators=[DataRequired(), Length(min=11, max=15), Regexp(regex=r'^\+?\d{11,15}$', message="Phone number must contain only digits")
+]) # State SelectField
     state = SelectField('State', choices=[
         ('Abia', 'Abia'), ('Adamawa', 'Adamawa'), ('Akwa Ibom', 'Akwa Ibom'),
         ('Anambra', 'Anambra'), ('Bauchi', 'Bauchi'), ('Bayelsa', 'Bayelsa'),
