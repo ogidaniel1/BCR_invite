@@ -1,0 +1,101 @@
+
+  <!DOCTYPE html>
+  <html>
+  <head>
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <title>QR Code Scanner</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        text-align: center;
+      }
+  
+      #fileInput {
+        margin-bottom: 10px;
+      }
+  
+      #preview {
+        width: 300px;
+        height: 200px;
+        border: 1px solid #ccc;
+      }
+  
+      #message {
+        margin-top: 10px;
+        font-weight: bold;
+      }
+    </style>
+    <script src="instascan.min.js"></script>
+  </head>
+  <body>
+    <label for="fileInput">Upload Image:</label>
+    <input type="file" id="fileInput">
+    <video id="preview"></video>
+    <div id="message"></div>
+  
+   
+  <script>
+    function scanUploadedFile(file) {
+      const reader = new FileReader();
+
+      reader.onload = function (e) {
+        const imageData = e.target.result;
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+
+        // Calculate image dimensions
+        const image = new Image();
+        image.onload = function () {
+          canvas.width = image.width;
+          canvas.height = image.height;
+          context.drawImage(image, 0, 0);
+
+          // Start scanning
+          const scanner = new Instascan.Scanner({ video: canvas });
+          scanner.start();
+
+          scanner.addListener('scan', function (content) {
+            console.log('QR code content:', content);
+
+            // Handle the scanned QR code content here
+            fetch('/confirm_qr_code', { // Replace '/confirm_qr_code' with your actual API endpoint
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ qr_code_data: content })
+            })
+            .then(response => response.json())
+            .then(data => {
+              let messageElement = document.getElementById('message');
+              if (data.error) {
+                messageElement.textContent = data.error;
+                messageElement.style.color = 'red';
+              } else if (data.confirmed) {
+                messageElement.textContent = `Invitee: ${data.invitee.invitee_name} is already confirmed.`;
+                messageElement.style.color = 'orange';
+              } else {
+                messageElement.textContent = `Invitee: ${data.invitee.invitee_name},
+                  Phone: ${data.invitee.invitee_phone},
+                  Position: ${data.invitee.invitee_position}`;
+                messageElement.style.color = 'green';
+              }
+            })
+            .catch((error) => {
+              console.error('Error:', error);
+            });
+          });
+        };
+        image.src = imageData;
+      };
+
+      reader.readAsDataURL(file);
+    }
+
+    document.getElementById('fileInput').addEventListener('change', function (e) {
+      const file = e.target.files[0];
+      scanUploadedFile(file);
+    });
+  </script>
+</body>
+</html>

@@ -2,111 +2,164 @@
 
 {% block title %}NIGERIAN GRASSROOT LEADERSHIP MERIT AWARD{% endblock %}
 
+{% block head %}
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        background-color: #f4f4f4;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        margin: 0;
+    }
+    .container {
+        background: #fff;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        width: 100%;
+        max-width: 400px;
+        box-sizing: border-box;
+    }
+    header {
+        text-align: center;
+        margin-bottom: 20px;
+    }
+    header img {
+        width: 100px;
+        height: auto;
+    }
+    h1 {
+        text-align: center;
+        color: #333;
+        margin-bottom: 20px;
+    }
+    label {
+        display: block;
+        margin-top: 10px;
+        color: #555;
+    }
+    input[type="text"], select {
+        width: 100%;
+        padding: 10px;
+        margin-top: 5px;
+        border-radius: 5px;
+        border: 1px solid #ccc;
+        box-sizing: border-box;
+    }
+    input[type="submit"] {
+        width: 100%;
+        padding: 10px;
+        margin-top: 15px;
+        border-radius: 5px;
+        border: none;
+        background-color: #28a745;
+        color: white;
+        cursor: pointer;
+        transition: background-color 0.3s;
+    }
+    input[type="submit"]:hover {
+        background-color: #218838;
+    }
+    .error {
+        color: red;
+        margin-bottom: 15px;
+    }
+    a {
+        display: block;
+        text-align: center;
+        margin-top: 20px;
+        text-decoration: none;
+        color: #007bff;
+    }
+    a:hover {
+        text-decoration: underline;
+    }
+    .alert {
+        padding: 10px;
+        margin-bottom: 20px;
+        border-radius: 5px;
+        text-align: center;
+    }
+    .alert-success {
+        background-color: #d4edda;
+        color: #155724;
+    }
+    .alert-error {
+        background-color: #f8d7da;
+        color: #721c24;
+    }
+</style>
+{% endblock %}
+
 {% block content %}
+<div class="container">
+    <header>
+        <img src="{{ url_for('static', filename='images/logo.png') }}" alt="Logo"> <!-- Adjust the path as needed -->
+    </header>
+    <h1>Register Invitee</h1>
 
-
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Register Invitee</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            background-color: #f4f4f4;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            margin: 0;
-        }
-        .container {
-            background: #fff;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-            width: 100%;
-            max-width: 400px;
-            box-sizing: border-box;
-        }
-        header {
-            text-align: center;
-            margin-bottom: 20px;
-        }
-        header img {
-            width: 100px; /* Adjust the size as needed */
-            height: auto;
-        }
-        h1 {
-            text-align: center;
-            color: #333;
-            margin-bottom: 20px;
-        }
-        label {
-            display: block;
-            margin-top: 10px;
-            color: #555;
-        }
-        input[type="text"] {
-            width: 100%;
-            padding: 10px;
-            margin-top: 5px;
-            border-radius: 5px;
-            border: 1px solid #ccc;
-            box-sizing: border-box;
-        }
-        input[type="submit"] {
-            width: 100%;
-            padding: 10px;
-            margin-top: 15px;
-            border-radius: 5px;
-            border: none;
-            background-color: #28a745;
-            color: white;
-            cursor: pointer;
-            transition: background-color 0.3s;
-        }
-        input[type="submit"]:hover {
-            background-color: #218838;
-        }
-        .error {
-            color: red;
-            margin-bottom: 15px;
-        }
-        a {
-            display: block;
-            text-align: center;
-            margin-top: 20px;
-            text-decoration: none;
-            color: #007bff;
-        }
-        a:hover {
-            text-decoration: underline;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <header>
-            <img src="{{ url_for('static', filename='images/logo.png') }}" alt="Logo"> <!-- Adjust the path as needed -->
-        </header>
-        <h1>Register Invitee</h1>
-        {% if error %}
-            <div class="error">
-                {{ error }}
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div>
+          {% for category, message in messages %}
+            <div class="alert alert-{{ category }}">
+              {{ message }}
             </div>
-        {% endif %}
-        <form method="POST" action="{{ url_for('register') }}">
-            {{ form.hidden_tag() }}
-            <label for="name">{{ form.name.label }}</label>
-            {{ form.name(class="form-control") }}
-            <label for="phone_number">{{ form.phone_number.label }}</label>
-            {{ form.phone_number(class="form-control") }}
-            {{ form.submit(class="btn btn-primary") }}
-        </form>
-        <a href="/x.com/danwebit">DanwebIT</a>
-    </div>
-</body>
-</html>
-{%endblock%}
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <form method="POST" action="{{ url_for('register') }}">
+        {{ form.hidden_tag() }}
+        <label for="name">{{ form.name.label }}</label>
+        {{ form.name(class="form-control") }}
+        <label for="phone_number">{{ form.phone_number.label }}</label>
+        {{ form.phone_number(class="form-control") }}
+        <label for="position">{{ form.position.label }}</label>
+        {{ form.position(class="form-control") }}
+        <label for="state">{{ form.state.label }}</label>
+        {{ form.state(class="form-control", id="state") }}
+        
+        <label for="lga">{{ form.lga.label }}</label>
+        <select id="lga" name="lga" class="form-control">
+        <option value="">Select LGA</option>
+        </select>
+
+        <br>
+        {{ form.submit(class="btn btn-primary") }}
+    </form>
+    <a href="/x.com/danwebit">DanwebIT</a>
+</div>
+
+<script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+
+<script>
+    $(document).ready(function() {
+        $('#state').change(function() {
+            var selectedState = $(this).val();
+            if (selectedState) {
+                $.ajax({
+                    url: "{{ url_for('get_lgas') }}",
+                    type: 'GET',
+                    data: {
+                        state: selectedState
+                    },
+                    success: function(response) {
+                        var lgaSelect = $('#lga');
+                        lgaSelect.empty();  // Clear current LGA options
+                        $.each(response.lga, function(index, lga) {
+                            lgaSelect.append(new Option(lga, lga));
+                        });
+                    },
+                    error: function() {
+                        alert('Error loading LGAs.');
+                    }
+                });
+            }
+        });
+    });
+</script>
+{% endblock %}

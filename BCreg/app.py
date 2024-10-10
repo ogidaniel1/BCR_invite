@@ -1,6 +1,8 @@
 import os
 from flask_wtf import CSRFProtect, FlaskForm
+from werkzeug.utils import secure_filename
 from functools import wraps
+from flask_wtf.csrf import generate_csrf, validate_csrf,CSRFError
 from flask_paginate import Pagination, get_page_parameter
 from flask import Flask, render_template, request, redirect, url_for, flash,jsonify, abort,Response, session
 from flask_sqlalchemy import SQLAlchemy
@@ -8,10 +10,12 @@ from Crypto.Hash import SHA256
 from flask_bcrypt import Bcrypt
 from flask_migrate import Migrate
 from alembic import op
+from datetime import datetime, timezone
 import json
+import logging
 import pandas as pd
 from wtforms import SubmitField
-from wtforms import StringField, SubmitField, FloatField,PasswordField
+from wtforms import StringField, SubmitField,SelectField, FloatField,PasswordField
 from wtforms.validators import DataRequired, Email, EqualTo,Length,ValidationError,Optional,Regexp
 # from utils import load_config, generate_db_uri
 from dotenv import load_dotenv
@@ -44,24 +48,17 @@ DEFAULT_ADMIN_PASSWORD = os.getenv('DEFAULT_ADMIN_PASSWORD')
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your_secret_key'
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///invitees.db'
+
+UPLOAD_FOLDER = '/path/to/uploads'
+
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
+csrf = CSRFProtect(app)
 
 application = app
 
-
-class InviteeForm(FlaskForm):
-    name = StringField('Member Name', validators=[Optional(), Length(min=2, max=100)])
-    phone_number = StringField('Phone Number', validators=[DataRequired(), Length(max=11), Regexp(regex='^\d+$', message="Phone number must contain only digits")])
-    submit = SubmitField('Register')
-
-
-class LoginForm(FlaskForm):
-    email = StringField('Email', validators=[DataRequired(), Email()])
-    password = PasswordField('Password', validators=[DataRequired()])
-    submit = SubmitField('Login')
-
+#####################################################################
 
 # Models
 class Admin(UserMixin, db.Model):
@@ -76,8 +73,124 @@ class Invitee(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=True)
     phone_number = db.Column(db.String(15), unique=True, nullable=False)
+    state = db.Column(db.String(100), nullable=False)
+    lga = db.Column(db.String(100), nullable=False)
+    position = db.Column(db.String(50), nullable=False)
     qr_code_path = db.Column(db.String(200), nullable=True)
-    confirmed = db.Column(db.String(20), default=None)  # New field to track confirmation
+    confirmed = db.Column(db.String(20), default='Absent')  # New field to track confirmation
+
+
+class DeleteLog(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    record_type = db.Column(db.String(50), nullable=False)  # E.g., 'admin', 'invitee'
+    record_id = db.Column(db.Integer, nullable=False)  # ID of the deleted record
+    deleted_by = db.Column(db.Integer, db.ForeignKey('admin.id'))  # ID of the webmaster who deleted
+    deleted_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # Relationship with Webmaster
+    deleted_by_admin = db.relationship('Admin', foreign_keys=[deleted_by])
+
+    def __repr__(self):
+        return f'<DeleteLog {self.record_type} {self.record_id} deleted by {self.deleted_by} at {self.deleted_at}>'
+
+#############################################
+
+def fetch_lgas(state):
+    # Mock LGA data for each state
+    state_lgas = {
+    'Abia': ['Aba North', 'Aba South', 'Arochukwu', 'Bende', 'Ikwuano', 'Isiala Ngwa North', 'Isiala Ngwa South', 'Isuikwuato', 'Obi Ngwa', 'Ohafia', 'Osisioma', 'Ugwunagbo', 'Ukwa East', 'Ukwa West', 'Umuahia North', 'Umuahia South', 'Umu Nneochi'],
+    'Adamawa': ['Demsa', 'Fufore', 'Ganye', 'Gayuk', 'Gombi', 'Grie', 'Hong', 'Jada', 'Lamurde', 'Madagali', 'Maiha', 'Mayo-Belwa', 'Michika', 'Mubi North', 'Mubi South', 'Numan', 'Shelleng', 'Song', 'Toungo', 'Yola North', 'Yola South'],
+    'Akwa Ibom': ['Abak', 'Eastern Obolo', 'Eket', 'Esit Eket', 'Essien Udim', 'Etim Ekpo', 'Etinan', 'Ibeno', 'Ibesikpo Asutan', 'Ibiono Ibom', 'Ika', 'Ikono', 'Ikot Abasi', 'Ikot Ekpene', 'Ini', 'Itu', 'Mbo', 'Mkpat-Enin', 'Nsit-Atai', 'Nsit-Ibom', 'Nsit-Ubium', 'Obot Akara', 'Okobo', 'Onna', 'Oron', 'Oruk Anam', 'Udung-Uko', 'Ukanafun', 'Uruan', 'Urue-Offong/Oruko', 'Uyo'],
+    'Anambra': ['Aguata', 'Anambra East', 'Anambra West', 'Anaocha', 'Awka North', 'Awka South', 'Ayamelum', 'Dunukofia', 'Ekwusigo', 'Idemili North', 'Idemili South', 'Ihiala', 'Njikoka', 'Nnewi North', 'Nnewi South', 'Ogbaru', 'Onitsha North', 'Onitsha South', 'Orumba North', 'Orumba South', 'Oyi'],
+    'Bauchi': ['Alkaleri', 'Bauchi', 'Bogoro', 'Damban', 'Darazo', 'Dass', 'Gamawa', 'Ganjuwa', 'Giade', 'Itas/Gadau', 'Jama\'are', 'Katagum', 'Kirfi', 'Misau', 'Ningi', 'Shira', 'Tafawa Balewa', 'Toro', 'Warji', 'Zaki'],
+    'Bayelsa': ['Brass', 'Ekeremor', 'Kolokuma/Opokuma', 'Nembe', 'Ogbia', 'Sagbama', 'Southern Ijaw', 'Yenagoa'],
+    'Benue': ['Ado', 'Agatu', 'Apa', 'Buruku', 'Gboko', 'Guma', 'Gwer East', 'Gwer West', 'Katsina-Ala', 'Konshisha', 'Kwande', 'Logo', 'Makurdi', 'Obi', 'Ogbadibo', 'Ohimini', 'Oju', 'Okpokwu', 'Otukpo', 'Tarka', 'Ukum', 'Ushongo', 'Vandeikya'],
+    'Borno': ['Abadam', 'Askira/Uba', 'Bama', 'Bayo', 'Biu', 'Chibok', 'Damboa', 'Dikwa', 'Gubio', 'Guzamala', 'Gwoza', 'Hawul', 'Jere', 'Kaga', 'Kala/Balge', 'Konduga', 'Kukawa', 'Kwaya Kusar', 'Mafa', 'Magumeri', 'Maiduguri', 'Marte', 'Mobbar', 'Monguno', 'Ngala', 'Nganzai', 'Shani'],
+    'Cross River': ['Abi', 'Akamkpa', 'Akpabuyo', 'Bakassi', 'Bekwarra', 'Biase', 'Boki', 'Calabar Municipal', 'Calabar South', 'Etung', 'Ikom', 'Obanliku', 'Obubra', 'Obudu', 'Odukpani', 'Ogoja', 'Yakuur', 'Yala'],
+    'Delta': ['Aniocha North', 'Aniocha South', 'Bomadi', 'Burutu', 'Ethiope East', 'Ethiope West', 'Ika North East', 'Ika South', 'Isoko North', 'Isoko South', 'Ndokwa East', 'Ndokwa West', 'Okpe', 'Oshimili North', 'Oshimili South', 'Patani', 'Sapele', 'Udu', 'Ughelli North', 'Ughelli South', 'Ukwuani', 'Uvwie', 'Warri North', 'Warri South', 'Warri South West'],
+    'Ebonyi': ['Abakaliki', 'Afikpo North', 'Afikpo South (Edda)', 'Ebonyi', 'Ezza North', 'Ezza South', 'Ikwo', 'Ishielu', 'Ivo', 'Izzi', 'Ohaozara', 'Ohaukwu', 'Onicha'],
+    'Edo': ['Akoko-Edo', 'Egor', 'Esan Central', 'Esan North-East', 'Esan South-East', 'Esan West', 'Etsako Central', 'Etsako East', 'Etsako West', 'Igueben', 'Ikpoba-Okha', 'Oredo', 'Orhionmwon', 'Ovia North-East', 'Ovia South-West', 'Owan East', 'Owan West', 'Uhunmwonde'],
+    'Ekiti': ['Ado Ekiti', 'Efon', 'Ekiti East', 'Ekiti South-West', 'Ekiti West', 'Emure', 'Gbonyin', 'Ido Osi', 'Ijero', 'Ikere', 'Ikole', 'Ilejemeje', 'Irepodun/Ifelodun', 'Ise/Orun', 'Moba', 'Oye'],
+    'Enugu': ['Aninri', 'Awgu', 'Enugu East', 'Enugu North', 'Enugu South', 'Ezeagu', 'Igbo Etiti', 'Igbo Eze North', 'Igbo Eze South', 'Isi Uzo', 'Nkanu East', 'Nkanu West', 'Nsukka', 'Oji River', 'Udenu', 'Udi', 'Uzo Uwani'],
+    'Gombe': ['Akko', 'Balanga', 'Billiri', 'Dukku', 'Funakaye', 'Gombe', 'Kaltungo', 'Kwami', 'Nafada', 'Shongom', 'Yamaltu/Deba'],
+    'Imo': ['Aboh Mbaise', 'Ahiazu Mbaise', 'Ehime Mbano', 'Ezinihitte', 'Ideato North', 'Ideato South', 'Ihitte/Uboma', 'Ikeduru', 'Isiala Mbano', 'Isu', 'Mbaitoli', 'Ngor Okpala', 'Njaba', 'Nkwerre', 'Nwangele', 'Obowo', 'Oguta', 'Ohaji/Egbema', 'Okigwe', 'Onuimo', 'Orlu', 'Orsu', 'Oru East', 'Oru West', 'Owerri Municipal', 'Owerri North', 'Owerri West'],
+    'Jigawa': ['Auyo', 'Babura', 'Biriniwa', 'Birnin Kudu', 'Buji', 'Dutse', 'Gagarawa', 'Garki', 'Gumel', 'Guri', 'Gwaram', 'Gwiwa', 'Hadejia', 'Jahun', 'Kafin Hausa', 'Kaugama', 'Kazaure', 'Kiri Kasama', 'Kiyawa', 'Maigatari', 'Malam Madori', 'Miga', 'Ringim', 'Roni', 'Sule Tankarkar', 'Taura', 'Yankwashi'],
+    'Kaduna': ['Birnin Gwari', 'Chikun', 'Giwa', 'Igabi', 'Ikara', 'Jaba', 'Jema\'a', 'Kachia', 'Kaduna North', 'Kaduna South', 'Kagarko', 'Kajuru', 'Kaura', 'Kauru', 'Kubau', 'Kudan', 'Lere', 'Makarfi', 'Sabon Gari', 'Sanga', 'Soba', 'Zangon Kataf', 'Zaria'],
+    'Kano': ['Ajingi', 'Albasu', 'Bagwai', 'Bebeji', 'Bichi', 'Bunkure', 'Dala', 'Dambatta', 'Dawakin Kudu', 'Dawakin Tofa', 'Doguwa', 'Fagge', 'Gabasawa', 'Garko', 'Garun Mallam', 'Gaya', 'Gezawa', 'Gwale', 'Gwarzo', 'Kabo', 'Kano Municipal', 'Karaye', 'Kibiya', 'Kiru', 'Kumbotso', 'Kunchi', 'Kura', 'Madobi', 'Makoda', 'Minjibir', 'Nasarawa', 'Rano', 'Rimin Gado', 'Rogo', 'Shanono', 'Sumaila', 'Takai', 'Tarauni', 'Tofa', 'Tsanyawa', 'Tudun Wada', 'Ungogo', 'Warawa', 'Wudil'],
+    'Katsina': ['Bakori', 'Batagarawa', 'Batsari', 'Baure', 'Bindawa', 'Charanchi', 'Dandume', 'Danja', 'Dan Musa', 'Daura', 'Dutsi', 'Dutsin Ma', 'Faskari', 'Funtua', 'Ingawa', 'Jibia', 'Kafur', 'Kaita', 'Kankara', 'Kankia', 'Katsina', 'Kurfi', 'Kusada', 'Mai\'Adua', 'Malumfashi', 'Mani', 'Mashi', 'Matazu', 'Musawa', 'Rimi', 'Sabuwa', 'Safana', 'Sandamu', 'Zango'],
+    'Kebbi': ['Aleiro', 'Arewa Dandi', 'Argungu', 'Augie', 'Bagudo', 'Birnin Kebbi', 'Bunza', 'Dandi', 'Fakai', 'Gwandu', 'Jega', 'Kalgo', 'Koko/Besse', 'Maiyama', 'Ngaski', 'Sakaba', 'Shanga', 'Suru', 'Danko/Wasagu', 'Yauri', 'Zuru'],
+    'Kogi': ['Adavi', 'Ajaokuta', 'Ankpa', 'Bassa', 'Dekina', 'Ibaji', 'Idah', 'Igalamela Odolu', 'Ijumu', 'Kabba/Bunu', 'Kogi', 'Lokoja', 'Mopa-Muro', 'Ofu', 'Ogori/Magongo', 'Okehi', 'Okene', 'Olamaboro', 'Omala', 'Yagba East', 'Yagba West'],
+    'Kwara': ['Asa', 'Baruten', 'Edu', 'Ekiti', 'Ifelodun', 'Ilorin East', 'Ilorin South', 'Ilorin West', 'Irepodun', 'Isin', 'Kaiama', 'Moro', 'Offa', 'Oke Ero', 'Oyun', 'Pategi'],
+    'Lagos': ['Agege', 'Ajeromi-Ifelodun', 'Alimosho', 'Amuwo-Odofin', 'Apapa', 'Badagry', 'Epe', 'Eti-Osa', 'Ibeju-Lekki', 'Ifako-Ijaiye', 'Ikeja', 'Ikorodu', 'Kosofe', 'Lagos Island', 'Lagos Mainland', 'Mushin', 'Ojo', 'Oshodi-Isolo', 'Shomolu', 'Surulere'],
+    'Nasarawa': ['Akwanga', 'Awe', 'Doma', 'Karu', 'Keana', 'Keffi', 'Kokona', 'Lafia', 'Nasarawa', 'Nasarawa Egon', 'Obi', 'Toto', 'Wamba'],
+    'Niger': ['Agaie', 'Agwara', 'Bida', 'Borgu', 'Bosso', 'Chanchaga', 'Edati', 'Gbako', 'Gurara', 'Katcha', 'Kontagora', 'Lapai', 'Lavun', 'Magama', 'Mariga', 'Mashegu', 'Mokwa', 'Muya', 'Paikoro', 'Rafi', 'Rijau', 'Shiroro', 'Suleja', 'Tafa', 'Wushishi'],
+    'Ogun': ['Abeokuta North', 'Abeokuta South', 'Ado-Odo/Ota', 'Ewekoro', 'Ifo', 'Ijebu East', 'Ijebu North', 'Ijebu North East', 'Ijebu Ode', 'Ikenne', 'Imeko Afon', 'Ipokia', 'Obafemi Owode', 'Odeda', 'Odogbolu', 'Ogun Waterside', 'Remo North', 'Shagamu', 'Yewa North', 'Yewa South'],
+    'Ondo': ['Akoko North-East', 'Akoko North-West', 'Akoko South-East', 'Akoko South-West', 'Akure North', 'Akure South', 'Ese Odo', 'Idanre', 'Ifedore', 'Ilaje', 'Ile Oluji/Okeigbo', 'Irele', 'Odigbo', 'Okitipupa', 'Ondo East', 'Ondo West', 'Ose', 'Owo'],
+    'Osun': ['Aiyedaade', 'Aiyedire', 'Atakunmosa East', 'Atakunmosa West', 'Boluwaduro', 'Boripe', 'Ede North', 'Ede South', 'Egbedore', 'Ejigbo', 'Ife Central', 'Ife East', 'Ife North', 'Ife South', 'Ifedayo', 'Ifelodun', 'Ila', 'Ilesha East', 'Ilesha West', 'Irepodun', 'Irewole', 'Isokan', 'Iwo', 'Obokun', 'Odo Otin', 'Ola Oluwa', 'Olorunda', 'Oriade', 'Orolu', 'Osogbo'],
+    'Oyo': ['Afijio', 'Akinyele', 'Atiba', 'Atisbo', 'Egbeda', 'Ibadan North', 'Ibadan North-East', 'Ibadan North-West', 'Ibadan South-East', 'Ibadan South-West', 'Ibarapa Central', 'Ibarapa East', 'Ibarapa North', 'Ido', 'Irepo', 'Iseyin', 'Itesiwaju', 'Iwajowa', 'Kajola', 'Lagelu', 'Ogo Oluwa', 'Ogbomosho North', 'Ogbomosho South', 'Olorunsogo', 'Oluyole', 'Ona Ara', 'Orelope', 'Ori Ire', 'Oyo East', 'Oyo West', 'Saki East', 'Saki West', 'Surulere'],
+    'Plateau': ['Barkin Ladi', 'Bassa', 'Bokkos', 'Jos East', 'Jos North', 'Jos South', 'Kanam', 'Kanke', 'Langtang North', 'Langtang South', 'Mangu', 'Mikang', 'Pankshin', 'Qua\'an Pan', 'Riyom', 'Shendam', 'Wase'],
+    'Rivers': ['Abua/Odual', 'Ahoada East', 'Ahoada West', 'Akuku Toru', 'Andoni', 'Asari-Toru', 'Bonny', 'Degema', 'Eleme', 'Emohua', 'Etche', 'Gokana', 'Ikwerre', 'Khana', 'Obio-Akpor', 'Ogba/Egbema/Ndoni', 'Ogu/Bolo', 'Okrika', 'Omuma', 'Opobo/Nkoro', 'Oyigbo', 'Port Harcourt', 'Tai'],
+    'Sokoto': ['Binji', 'Bodinga', 'Dange Shuni', 'Gada', 'Goronyo', 'Gudu', 'Gwadabawa', 'Illela', 'Isa', 'Kebbe', 'Kware', 'Rabah', 'Sabon Birni', 'Shagari', 'Silame', 'Sokoto North', 'Sokoto South', 'Tambuwal', 'Tangaza', 'Tureta', 'Wamako', 'Wurno', 'Yabo'],
+    'Taraba': ['Ardo Kola', 'Bali', 'Donga', 'Gashaka', 'Gassol', 'Ibi', 'Jalingo', 'Karim Lamido', 'Kurmi', 'Lau', 'Sardauna', 'Takum', 'Ussa', 'Wukari', 'Yorro', 'Zing'],
+    'Yobe': ['Bade', 'Bursari', 'Damaturu', 'Fika', 'Fune', 'Geidam', 'Gujba', 'Gulani', 'Jakusko', 'Karasuwa', 'Machina', 'Nangere', 'Nguru', 'Potiskum', 'Tarmuwa', 'Yunusari', 'Yusufari'],
+    'Zamfara': ['Anka', 'Bakura', 'Birnin Magaji/Kiyaw', 'Bukkuyum', 'Bungudu', 'Chafe', 'Gummi', 'Gusau', 'Kaura Namoda', 'Maradun', 'Maru', 'Shinkafi', 'Talata Mafara', 'Zurmi'],
+    'Fct': ['Abaji', 'Bwari', 'Gwagwalada', 'Kuje', 'Kwali', 'Municipal Area Council (AMAC)'],
+   
+}
+    
+    return state_lgas.get(state, [])
+
+###########################################################
+
+@app.route('/get_lgas', methods=['GET'])
+def get_lgas():
+    state = request.args.get('state')
+    state = state.title() if state else ""
+
+    lga = fetch_lgas(state)
+    
+    if lga:
+        return jsonify({'lga': lga})
+    else:
+        return jsonify({'error': 'State not found'}), 404
+
+    
+#####################################################################
+
+class InviteeForm(FlaskForm):
+    name = StringField('Member Name', validators=[DataRequired(), Length(min=2, max=100)])
+    phone_number = StringField('Phone Number', validators=[DataRequired(), Length(max=11), Regexp(regex='^\d+$', message="Phone number must contain only digits")])
+     # State SelectField
+    state = SelectField('State', choices=[
+        ('Abia', 'Abia'), ('Adamawa', 'Adamawa'), ('Akwa Ibom', 'Akwa Ibom'),
+        ('Anambra', 'Anambra'), ('Bauchi', 'Bauchi'), ('Bayelsa', 'Bayelsa'),
+        ('Benue', 'Benue'), ('Borno', 'Borno'), ('Cross River', 'Cross River'),
+        ('Delta', 'Delta'), ('Ebonyi', 'Ebonyi'), ('Edo', 'Edo'), ('Ekiti', 'Ekiti'),
+        ('Enugu', 'Enugu'), ('Gombe', 'Gombe'), ('Imo', 'Imo'), ('Jigawa', 'Jigawa'),
+        ('Kaduna', 'Kaduna'), ('Kano', 'Kano'), ('Katsina', 'Katsina'), ('Kebbi', 'Kebbi'),
+        ('Kogi', 'Kogi'), ('Kwara', 'Kwara'), ('Lagos', 'Lagos'), ('Nasarawa', 'Nasarawa'),
+        ('Niger', 'Niger'), ('Ogun', 'Ogun'), ('Ondo', 'Ondo'), ('Osun', 'Osun'),
+        ('Oyo', 'Oyo'), ('Plateau', 'Plateau'), ('Rivers', 'Rivers'), ('Sokoto', 'Sokoto'),
+        ('Taraba', 'Taraba'), ('Yobe', 'Yobe'), ('Zamfara', 'Zamfara'), ('Fct', 'FCT'),
+    ], validators=[DataRequired()])
+    
+    # LGA SelectField (empty initially, will be populated dynamically)
+    lga = SelectField('LGA', choices=[],  validators=[Optional()])
+    position = StringField('Position', validators=[DataRequired(), Length(min=2, max=100)])
+    submit = SubmitField('Register')
+
+
+class LoginForm(FlaskForm):
+    email = StringField('Email', validators=[DataRequired(), Email()])
+    password = PasswordField('Password', validators=[DataRequired()])
+    submit = SubmitField('Login')
+
+#######################################################
+class DeleteInviteeForm(FlaskForm):
+    email = StringField('Email', validators=[DataRequired(), Email()])
+    submit = SubmitField('Delete Invitee')
+
+
+######################################################
 
 
 login_manager = LoginManager()
@@ -123,7 +236,7 @@ def login():
         admin = Admin.query.filter_by(email=form.email.data).first()
         if admin and check_password_hash(admin.password, form.password.data):
             login_user(admin)
-            flash('Login successful!', 'success')
+            # flash('Login successful!', 'success')
             return redirect(url_for('scan_qr'))
         else:
             flash('Invalid email or password.', 'danger')
@@ -143,6 +256,101 @@ def home():
     form = InviteeForm()
     return render_template('register.html', form=form)
 
+######################...helper...#########################
+
+#Helper Function for Logging Actions
+def log_action(action_type, user_id, record_type=None, record_id=None):
+    print(f'Action Type: {action_type}, User ID: {user_id}, Record Type: {record_type}, Record ID: {record_id}')
+    
+    # Check if record_type is provided only for delete actions
+    if action_type == 'delete' and record_type is None:
+        raise ValueError("record_type must be provided for logging deletions.")
+
+    try:
+        if action_type == 'delete':
+            # Create a DeleteLog entry only for deletions
+            delete_log = DeleteLog(
+                record_type=record_type,
+                record_id=record_id,
+                deleted_by=user_id
+            )
+            db.session.add(delete_log)
+        else:
+            # Handle other actions (like 'edit', 'create', etc.)
+            # You can create separate logs for these actions if needed
+            # For now, it's a placeholder print statement
+            print(f"Action {action_type} performed by user {user_id}")
+
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error logging action: {e}")
+
+
+##################################################
+# ............delete function..................
+
+@app.route('/del_invitee/<int:invitee_id>', methods=['POST'])
+@login_required
+def del_invitee(invitee_id):
+    
+    if not current_user.is_authenticated or not current_user.is_admin:
+        return jsonify({'status': 'error', 'message': 'You do not have access to this action'}), 403
+
+    try:
+        # Get CSRF token from the headers
+        csrf_token = request.headers.get('X-CSRFToken')
+        validate_csrf(csrf_token)  # Validate the token
+        
+        invitee = Invitee.query.get_or_404(invitee_id)
+        
+        # Delete associated attendance records if necessary (update this part as needed)
+        Invitee.query.filter_by(id=invitee_id).delete()
+
+        # Log the deletion
+# Log the deletion
+        log_action('del_invitee', current_user.id, record_type='invitee', record_id=invitee.id)
+ 
+        # Delete the invitee record
+        db.session.delete(invitee)
+        db.session.commit()
+        
+        return jsonify({'status': 'success', 'message': 'Invitee deleted successfully'}), 200
+    except Exception as e:
+        db.session.rollback()  # Rollback in case of error
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+    
+
+@app.route('/manage_invitee', methods=['GET','POST'])
+@login_required
+def manage_invitee():
+    # Ensure only admins can view the page
+    if not current_user.is_admin:
+        flash('You do not have access to this page.', 'danger')
+        return redirect(url_for('login'))
+
+    # Get search query and pagination parameters
+    search = request.args.get('search', '', type=str)
+    page = request.args.get('page', 1, type=int)
+    per_page = 10
+
+    # Filter based on search input
+    if search:
+        invitees_query = Invitee.query.filter(
+            (Invitee.id.ilike(f'%{search}%')) | 
+            (Invitee.phone_number.ilike(f'%{search}%'))
+        )
+    else:
+        invitees_query = Invitee.query
+
+    # Apply pagination
+    pagination = invitees_query.order_by(Invitee.id.desc()).paginate(page=page, per_page=per_page, error_out=False)
+    invitees = pagination.items
+
+    # Render the invitees list
+    return render_template('del_inv.html', invitees=invitees, pagination=pagination, search=search)
+
+
 ###############################################
 
 def generate_qr_code(data):
@@ -161,30 +369,49 @@ def generate_qr_code(data):
     byte_arr.seek(0)
     return base64.b64encode(byte_arr.getvalue()).decode('utf-8')
 
+####################################################################
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     form = InviteeForm()
+    
+    # Populate LGA choices if state is selected
+    if form.state.data:
+        form.lga.choices = [(lga, lga) for lga in fetch_lgas(form.state.data)]
+    
     if form.validate_on_submit():
+        # Get form data
         name = form.name.data.title() 
         phone_number = form.phone_number.data
+        state = form.state.data
+        lga = form.lga.data  # This is where you capture LGA
+        position = form.position.data
         
         # Check for duplicates
         existing_invitee = Invitee.query.filter_by(phone_number=phone_number).first()
         if existing_invitee:
-            # If an invitee with the same phone number exists, show an error message
-            return render_template('register.html', form=form, error="An invitee with this phone number already exists.")
+            flash("An invitee with this phone number already exists.", "error")
+            return redirect(url_for('register'))
         
         # Create a new invitee
-        new_invitee = Invitee(name=name, phone_number=phone_number)
-        db.session.add(new_invitee)
-        db.session.commit()
+        new_invitee = Invitee(name=name, phone_number=phone_number, state=state, position=position, lga=lga)
         
-        # Generate QR code
-        qr_code_path = generate_qr_code(new_invitee.id)
-        
-        return redirect(url_for('success', qr_code_path=qr_code_path))
+        try:
+            # Add to session and commit to the database
+            db.session.add(new_invitee)
+            db.session.commit()
+
+            # Generate QR code after commit
+            qr_code_path = generate_qr_code(new_invitee.id)
+            
+            flash("Registration successful!", "success")
+            return redirect(url_for('success', qr_code_path=qr_code_path))
+        except Exception as e:
+            db.session.rollback()
+            flash(f"Error saving to database: {str(e)}", "error")
+            return redirect(url_for('register'))
     
+    # Render the registration form
     return render_template('register.html', form=form)
 
 
@@ -194,50 +421,63 @@ def success():
     if not qr_code_path:
         return 'QR code path is missing', 400
     return render_template('success.html', qr_code_path=qr_code_path)
-###############################################
+
+
+############################.....................##############
 
 @app.route('/confirm_qr_code', methods=['POST'])
+@login_required
+@csrf.exempt
 def confirm_qr_code():
     qr_code_data = request.json.get('qr_code_data')
-    
+
     if not qr_code_data:
         return jsonify({'error': 'QR code data is missing'}), 400
 
-    # Assuming the QR code data is the invitee's ID
-    invitee = Invitee.query.get(qr_code_data)
-    
-    if not invitee:
-        return jsonify({'error': 'Invitee not found'}), 404
-    
-    if invitee.confirmed == "Present":
-        return jsonify({
-            'message': 'You have already been confirmed',
-            'invitee_name': invitee.name
-        }), 200
-    
-    # Confirm the invitee by setting "confirmed" to "Present"
-    invitee.confirmed = "Present"
-    db.session.commit()
-    
-    # Return confirmation details
-    return jsonify({
-        'message': 'Invitee confirmed',
-        'invitee_name': invitee.name
-    }), 200
+    try:
+        invitee = Invitee.query.get(qr_code_data)
+        if invitee:
+            if invitee.confirmed == "Present":
+                return jsonify({
+                    'message': 'Invitee already confirmed',
+                    'invitee_name': invitee.name,
+                    'invitee_phone_number': invitee.phone_number,
+                    'invitee_position': invitee.position,
+                    'already_confirmed': True,
+                }), 200
+            else:
+                # Confirm the invitee
+                invitee.confirmed = "Present"
+                db.session.commit()
 
-   
+                return jsonify({
+                    'message': 'Invitee confirmed',
+                    'invitee_name': invitee.name,
+                    'invitee_phone_number': invitee.phone_number,
+                    'invitee_position': invitee.position,
+                }), 200
+        else:
+            return jsonify({'error': 'Invitee not found'}), 404
+    except Exception as e:
+        return jsonify({'error': 'Error confirming invitee'}), 500
+    
+##############################################
+
 @app.route('/scan_qr')
 @admin_required
 def scan_qr():
-
+    
     return render_template('scan_qr.html')
 
 ###############################################
+
 
 @app.route('/get_qr_code/<int:invitee_id>')
 def get_qr_code(invitee_id):
     qr_code_path = generate_qr_code(invitee_id)
     return jsonify({'qr_code_path': qr_code_path})
+
+################################################################
 
 
 @app.route('/invitees')
@@ -256,6 +496,7 @@ def show_invitees():
             (Invitee.id.ilike(f'%{search}%')) | 
             (Invitee.phone_number.ilike(f'%{search}%'))
         )
+    
     else:
         invitees_query = Invitee.query
 
@@ -264,120 +505,34 @@ def show_invitees():
 
     return render_template('invitees.html', invitees=invitees, pagination=pagination, search=search)
 
-# @app.route('/attended_invitees')
-# def attended_invitees():
-#     # Query all invitees who have "attended"
-#     attended_invitees = Invitee.query.filter_by(confirmed="attended").all()
-    
-#     # You can pass this to a template or return as JSON, depending on your application
-#     return render_template('attended_invitees.html', invitees=attended_invitees)
+# ##################for opencv...............
 
-#################################################################
+@app.route('/upload_qr_code', methods=['POST'])
+def upload_qr_code():
+    if 'qr_code_image' not in request.files:
+        return jsonify({'error': 'No QR code image file provided'}), 400
 
-# scan_qr_code function..........################################
-#a Python Script for QR Code Scanning: This script will use OpenCV to access the webcam, detect QR codes, and decode them
+    qr_code_file = request.files['qr_code_image']
 
-# def scan_qr_code():
-#     # Initialize the camera (0 is the default camera)
-#     cap = cv2.VideoCapture(0)
-    
-#     if not cap.isOpened():
-#         print("Error: Could not open the camera.")
-#         return None
+    if qr_code_file.filename == '':
+        return jsonify({'error': 'No QR code image selected'}), 400
 
-#     while True:
-#         # Capture frame-by-frame
-#         ret, frame = cap.read()
-        
-#         if not ret:
-#             print("Error: Could not read a frame from the camera.")
-#             continue
+    # Save the uploaded image to a temporary location
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(qr_code_file.filename))
+    qr_code_file.save(filepath)
 
-#         # Decode QR codes in the frame
-#         qr_codes = decode(frame)
+    # Process the QR code image using a library like pyzbar
+    try:
+        qr_code_file = confirm_qr_code(filepath)
+    except Exception as e:
+        return jsonify({'error': f'Error decoding QR code: {str(e)}'}), 500
 
-#         for qr_code in qr_codes:
-#             # Extract the QR code data
-#             qr_data = qr_code.data.decode('utf-8')
-#             print(f"QR Code detected: {qr_data}")
+@app.route('/scanqrh5')
+@admin_required
+def scanqrh5():
 
-#             # Draw a rectangle around the QR code
-#             (x, y, w, h) = qr_code.rect
-#             cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+    return render_template('scanqrh5.html')
 
-#             # Display the QR code data on the screen
-#             cv2.putText(frame, qr_data, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-
-#             # Release the camera and close windows after detecting the first QR code
-#             cap.release()
-#             cv2.destroyAllWindows()
-#             return qr_data
-
-#         # Display the resulting frame
-#         cv2.imshow('QR Code Scanner', frame)
-
-#         # Break the loop on 'q' key press
-#         if cv2.waitKey(1) & 0xFF == ord('q'):
-#             break
-
-#     # Release the capture and close any OpenCV windows
-#     cap.release()
-#     cv2.destroyAllWindows()
-#     return None
-
-def scan_qr_code(camera_index=1):  # Default to the second camera (index 1)
-    # Initialize the camera with the specified index
-    cap = cv2.VideoCapture(camera_index)
-    
-    if not cap.isOpened():
-        print(f"Error: Could not open the camera with index {camera_index}.")
-        return None
-
-    while True:
-        # Capture frame-by-frame
-        ret, frame = cap.read()
-        
-        if not ret:
-            print("Error: Could not read a frame from the camera.")
-            continue
-
-        # Decode QR codes in the frame
-        qr_codes = decode(frame)
-
-        for qr_code in qr_codes:
-            # Extract the QR code data
-            qr_data = qr_code.data.decode('utf-8')
-            print(f"QR Code detected: {qr_data}")
-
-            # Draw a rectangle around the QR code
-            (x, y, w, h) = qr_code.rect
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-
-            # Display the QR code data on the screen
-            cv2.putText(frame, qr_data, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-
-            # Release the camera and close windows after detecting the first QR code
-            cap.release()
-            cv2.destroyAllWindows()
-            return qr_data
-
-        # Display the resulting frame
-        cv2.imshow('QR Code Scanner', frame)
-
-        # Break the loop on 'q' key press
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-
-    # Release the capture and close any OpenCV windows
-    cap.release()
-    cv2.destroyAllWindows()
-    return None
-
-# Example usage:
-# To use the rear camera, specify the camera index. You may need to experiment with the index value.
-qr_data = scan_qr_code(camera_index=1)
-if qr_data:
-    print(f"Scanned QR Code data: {qr_data}")
 
 
 if __name__ == '__main__':
