@@ -471,7 +471,6 @@ def scan_qr():
 
 ###############################################
 
-
 @app.route('/get_qr_code/<int:invitee_id>')
 def get_qr_code(invitee_id):
     qr_code_path = generate_qr_code(invitee_id)
@@ -481,7 +480,7 @@ def get_qr_code(invitee_id):
 
 
 @app.route('/invitees')
-@admin_required
+@login_required
 def show_invitees():
     if not current_user.is_authenticated or not current_user.is_admin:
         flash('You do not have access to this page.', 'danger')
@@ -506,26 +505,6 @@ def show_invitees():
     return render_template('invitees.html', invitees=invitees, pagination=pagination, search=search)
 
 # ##################for opencv...............
-
-@app.route('/upload_qr_code', methods=['POST'])
-def upload_qr_code():
-    if 'qr_code_image' not in request.files:
-        return jsonify({'error': 'No QR code image file provided'}), 400
-
-    qr_code_file = request.files['qr_code_image']
-
-    if qr_code_file.filename == '':
-        return jsonify({'error': 'No QR code image selected'}), 400
-
-    # Save the uploaded image to a temporary location
-    filepath = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(qr_code_file.filename))
-    qr_code_file.save(filepath)
-
-    # Process the QR code image using a library like pyzbar
-    try:
-        qr_code_file = confirm_qr_code(filepath)
-    except Exception as e:
-        return jsonify({'error': f'Error decoding QR code: {str(e)}'}), 500
 
 @app.route('/scanqrh5')
 @admin_required

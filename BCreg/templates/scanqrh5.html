@@ -72,12 +72,12 @@
                 messageElement.textContent = data.error;
                 messageElement.style.color = 'red';
               } else if (data.confirmed) {
-                messageElement.textContent = `Invitee: ${data.invitee.invitee_name} is already confirmed.`;
+                messageElement.textContent = `Invitee: ${data.invitee_name} is already confirmed.`;
                 messageElement.style.color = 'orange';
               } else {
-                messageElement.textContent = `Invitee: ${data.invitee.invitee_name},
-                  Phone: ${data.invitee.invitee_phone},
-                  Position: ${data.invitee.invitee_position}`;
+                messageElement.textContent = `Invitee: ${data.invitee_name},
+                  Phone: ${data.invitee_phone},
+                  Position: ${data.invitee_position}`;
                 messageElement.style.color = 'green';
               }
             })
