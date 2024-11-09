@@ -26,15 +26,19 @@ from flask_sqlalchemy import SQLAlchemy
 import qrcode
 from flask_login import LoginManager, login_user, login_required, current_user, logout_user, UserMixin
 from flask_sqlalchemy import SQLAlchemy
+# from flask import Flask, send_from_static
 from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField, SubmitField
 from wtforms.validators import DataRequired, Email
 from werkzeug.security import generate_password_hash, check_password_hash
 import io
+from flask_mail import  Mail,Message
+from email.mime.image import MIMEImage
+import smtplib
 import base64
 import cv2
 import subprocess
-# from pyzbar 
+from sqlalchemy.exc import IntegrityError,OperationalError
 import pyzbar
 from pyzbar.pyzbar import decode
 
@@ -45,11 +49,27 @@ load_dotenv()
 DEFAULT_ADMIN_EMAIL = os.getenv('DEFAULT_ADMIN_EMAIL')
 DEFAULT_ADMIN_PASSWORD = os.getenv('DEFAULT_ADMIN_PASSWORD')
 
+
+
+
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your_secret_key'
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///invitees.db'
+app.config['SQLALCHEMY_POOL_RECYCLE'] = 3600  # Recycle connections every hour
+app.config['SQLALCHEMY_POOL_PRE_PING'] = True  # Pre-ping connections to verify they're still valid
+app.config['UPLOAD_FOLDER'] = 'static/qr_codes'
 
-UPLOAD_FOLDER = '/path/to/uploads'
+
+
+# config.py or app setup
+# Looking to send emails in production? Check out our Email API/SMTP product!
+app.config['MAIL_SERVER']='sandbox.smtp.mailtrap.io'
+app.config['MAIL_PORT'] = 2525
+app.config['MAIL_USERNAME'] = '2d210b819d0f12'
+app.config['MAIL_PASSWORD'] = '804323d6c92a70'
+app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_USE_SSL'] = False
+
 
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
@@ -58,6 +78,7 @@ csrf = CSRFProtect(app)
 
 application = app
 
+mail = Mail(app)
 #####################################################################
 
 # Models
@@ -72,10 +93,12 @@ class Admin(UserMixin, db.Model):
 class Invitee(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=True)
+    email = db.Column(db.String(100), nullable=True)
     phone_number = db.Column(db.String(15), unique=True, nullable=False)
-    state = db.Column(db.String(100), nullable=False)
-    lga = db.Column(db.String(100), nullable=False)
+    state = db.Column(db.String(100), nullable=True)
+    lga = db.Column(db.String(100), nullable=True)
     position = db.Column(db.String(50), nullable=False)
+    deleted = db.Column(db.Boolean, default=False)
     qr_code_path = db.Column(db.String(200), nullable=True)
     confirmed = db.Column(db.String(20), default='Absent')  # New field to track confirmation
 
@@ -158,6 +181,7 @@ def get_lgas():
 
 class InviteeForm(FlaskForm):
     name = StringField('Member Name', validators=[DataRequired(), Length(min=2, max=100)])
+    email = StringField('Email', validators=[DataRequired(), Email(message="Invalid email address")])
     phone_number = StringField('Phone Number', validators=[DataRequired(), Length(min=11, max=15), Regexp(regex=r'^\+?\d{11,15}$', message="Phone number must contain only digits")
 ]) # State SelectField
     state = SelectField('State', choices=[
@@ -191,7 +215,6 @@ class DeleteInviteeForm(FlaskForm):
 
 
 ######################################################
-
 
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -308,7 +331,6 @@ def del_invitee(invitee_id):
         Invitee.query.filter_by(id=invitee_id).delete()
 
         # Log the deletion
-# Log the deletion
         log_action('del_invitee', current_user.id, record_type='invitee', record_id=invitee.id)
  
         # Delete the invitee record
@@ -320,10 +342,55 @@ def del_invitee(invitee_id):
         db.session.rollback()  # Rollback in case of error
         return jsonify({'status': 'error', 'message': str(e)}), 400
     
+##################################################
+# ............mark attendance function..................
 
-@app.route('/manage_invitee', methods=['GET','POST'])
+@app.route('/mark_invitee/<int:invitee_id>', methods=['POST'])
+@login_required
+def mark_invitee(invitee_id):
+    
+       
+    if not current_user.is_authenticated or not current_user.is_admin:
+        return jsonify({'status': 'error', 'message': 'You do not have access to this action'}), 403
+    
+
+    try:
+
+        # Get CSRF token from the headers
+        csrf_token = request.headers.get('X-CSRFToken')
+        validate_csrf(csrf_token)  # Validate the token
+
+        invitee = Invitee.query.get_or_404(invitee_id)
+
+        if not invitee_id:
+            return jsonify({'status': 'error', 'message':'invitee ID is required '}),400
+        
+        if not invitee:
+            return jsonify({'status': 'error', 'message':'invitee not found '}),400
+        
+        if invitee.confirmed == 'Present':
+            return jsonify({'status': 'error', 'message': 'Invitee has already been marked as Present'}), 400
+
+        # Mark the invitee as present
+        invitee.confirmed = 'Present'
+    
+        # Log the deletion
+        log_action('del_invitee', current_user.id, record_type='invitee', record_id=invitee.id)
+               
+        db.session.add(invitee)
+        db.session.commit()
+        
+        return jsonify({'status': 'success', 'message': 'Invitee marked Present successfully'}), 200
+        
+    except Exception as e:
+        db.session.rollback()  # Rollback in case of error
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+
+
+@app.route('/manage_invitee', methods=['POST','GET'])
 @login_required
 def manage_invitee():
+
     # Ensure only admins can view the page
     if not current_user.is_admin:
         flash('You do not have access to this page.', 'danger')
@@ -336,10 +403,13 @@ def manage_invitee():
 
     # Filter based on search input
     if search:
+        # user = User.query.filter((Invitee.id== search) | (Invitee.phone_number == search_term)).first()
         invitees_query = Invitee.query.filter(
             (Invitee.id.ilike(f'%{search}%')) | 
             (Invitee.phone_number.ilike(f'%{search}%'))
         )
+        if not search:
+            flash('Invitee not found', 'danger')
     else:
         invitees_query = Invitee.query
 
@@ -347,7 +417,7 @@ def manage_invitee():
     pagination = invitees_query.order_by(Invitee.id.desc()).paginate(page=page, per_page=per_page, error_out=False)
     invitees = pagination.items
 
-    # Render the invitees list
+     # Render the invitees list
     return render_template('del_inv.html', invitees=invitees, pagination=pagination, search=search)
 
 
@@ -381,18 +451,24 @@ def register():
     
     if form.validate_on_submit():
         # Get form data
-        name = form.name.data.title() 
+        name = form.name.data.title()
+        email = form.email.data.title() 
         phone_number = form.phone_number.data
         state = form.state.data
         lga = form.lga.data  # This is where you capture LGA
-        position = form.position.data
+        position = form.position.data.title()
         
         # Check for duplicates
-        existing_invitee = Invitee.query.filter_by(phone_number=phone_number).first()
+        existing_invitee = Invitee.query.filter_by(phone_number=phone_number).first() \
+                            or Invitee.query.filter_by(email=email).first()
         if existing_invitee:
             flash("An invitee with this phone number already exists.", "error")
             return redirect(url_for('register'))
         
+        if "@" not in form.email.data:
+            flash("Invalid email address.", "error")
+            return redirect(url_for('register'))
+
         # Create a new invitee
         new_invitee = Invitee(name=name, phone_number=phone_number, state=state, position=position, lga=lga)
         
@@ -403,9 +479,19 @@ def register():
 
             # Generate QR code after commit
             qr_code_path = generate_qr_code(new_invitee.id)
-            
-            flash("Registration successful!", "success")
+
+            #send Qr image via email..
+            send_qr_code_email(new_invitee, qr_code_path)
+
+            flash("Registration successful! A confirmation email has been sent!", "success")
             return redirect(url_for('success', qr_code_path=qr_code_path))
+        
+
+        except smtplib.SMTPException as e:
+            db.session.rollback()
+            flash(f"Registration successful, but an error occurred while sending the email: {str(e)}", "error")
+            return redirect(url_for('register'))
+        
         except Exception as e:
             db.session.rollback()
             flash(f"Error saving to database: {str(e)}", "error")
@@ -437,6 +523,11 @@ def confirm_qr_code():
     try:
         invitee = Invitee.query.get(qr_code_data)
         if invitee:
+
+            #avoiding reassigning of deleted QR code to invitee
+            if invitee.deleted:
+                return jsonify({'error': 'Invitee is deleted'}), 400
+            
             if invitee.confirmed == "Present":
                 return jsonify({
                     'message': 'Invitee already confirmed',
@@ -480,7 +571,7 @@ def get_qr_code(invitee_id):
 
 
 @app.route('/invitees')
-@login_required
+@admin_required
 def show_invitees():
     if not current_user.is_authenticated or not current_user.is_admin:
         flash('You do not have access to this page.', 'danger')
@@ -511,8 +602,43 @@ def show_invitees():
 def scanqrh5():
 
     return render_template('scanqrh5.html')
+##########################################################
 
+ 
 
+def send_qr_code_email(invitee, qr_code_path):
+    try:
+        msg = Message(subject="Registration Confirmation and QR Code",
+                      recipients=[invitee.email])
+        msg.body = f"Dear {invitee.name},\n\nThank you for registering. Please find your QR code attached."
+        
+        with app.open_resource(qr_code_path) as qr_code:
+            msg.attach("qr_code.png", "image/png", qr_code.read())
+        
+        mail.send(msg)
+        print("Email sent successfully!")
+
+    except smtplib.SMTPException as e:
+        # Log the error or handle it (e.g., retry logic)
+        print(f"Error sending email: {e}")
+        raise e  # Raise the exception back so it can be caught in the calling function
+    
+
+#######################################################
+
+# @app.route('/test_email')
+# def test_email():
+#     try:
+#         msg = Message(subject="Test Email",
+#                       sender="danwebit@gmail.com",
+#                       recipients=["hoghidan1@gmail.com"],
+#                       body="This is a test email from Flask.")
+#         mail.send(msg)
+#         return "Email sent successfully!"
+#     except Exception as e:
+#         return str(e)
+
+######################################################
 
 if __name__ == '__main__':
         
@@ -523,5 +649,5 @@ if __name__ == '__main__':
         db.create_all()
         #create default admin
         create_default_admin()
-
-    app.run(debug=True)
+#host='0.0.0.0', enables the app run locally or remotely on a local network
+    app.run(host='0.0.0.0',debug=True)

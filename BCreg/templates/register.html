@@ -83,17 +83,22 @@
         text-align: center;
     }
     .alert-success {
-        background-color: #d4edda;
-        color: #155724;
+        color: green;
+        padding: 10px;
+        border: 1px solid green;
+        background-color: #e6ffe6;
     }
     .alert-error {
-        background-color: #f8d7da;
-        color: #721c24;
+        color: red;
+        padding: 10px;
+        border: 1px solid red;
+        background-color: #ffe6e6;
     }
 </style>
 {% endblock %}
 
 {% block content %}
+ 
 <div class="container">
     <header>
         <img src="{{ url_for('static', filename='images/logo.png') }}" alt="Logo"> <!-- Adjust the path as needed -->
@@ -101,22 +106,34 @@
     <h1>Register Invitee</h1>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
-      {% if messages %}
+    {% if messages %}
         <div>
-          {% for category, message in messages %}
-            <div class="alert alert-{{ category }}">
-              {{ message }}
+        {% for category, message in messages %}
+            <div class="alert alert-{{ 'error' if category == 'error' else category }}">
+            {{ message }}
             </div>
-          {% endfor %}
+        {% endfor %}
         </div>
-      {% endif %}
+    {% endif %}
     {% endwith %}
 
     <form method="POST" action="{{ url_for('register') }}">
         {{ form.hidden_tag() }}
         <label for="name">{{ form.name.label }}</label>
         {{ form.name(class="form-control") }}
+        <label for="email">{{ form.email.label }}</label>
+        <!-- {% if form.email.errors %}
+        <div class="alert-error">
+            {{ form.email.errors[0] }}
+        </div>
+        {% endif %} -->
+        {{ form.email(class="form-control") }}
         <label for="phone_number">{{ form.phone_number.label }}</label>
+        <!-- {% if form.phone_number.errors %}
+        <div class="alert-error">
+            {{ form.phone_number.errors[0] }}
+        </div>
+        {% endif %} -->
         {{ form.phone_number(class="form-control") }}
         <label for="position">{{ form.position.label }}</label>
         {{ form.position(class="form-control") }}

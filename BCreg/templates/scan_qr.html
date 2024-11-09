@@ -121,10 +121,11 @@
                 messageElement.style.color = 'orange'; // Adjust color for confirmation message
                 } else {
                 messageElement.innerHTML = `
-                    Message: ${data.message}<br>
+                    Status: ${data.message}<br>
+                    <div style="text-align:left;"><small>
                     Invitee Name: ${data.invitee_name}<br>
                     Phone Number: ${data.invitee_phone_number}<br>
-                    Position: ${data.invitee_position}<br>
+                    Position: <span style="text-transform: uppercase;">${data.invitee_position}</span><br></small></div>
                 `;
                   messageElement.style.color = 'green';
                 }

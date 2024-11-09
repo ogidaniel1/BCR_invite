@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Invitees</title>
+    <title>Manage Invitees</title>
     
     <!-- CSRF token field for POST requests -->
     <meta name="csrf-token" content="{{ csrf_token() }}">
@@ -40,20 +40,25 @@
     </style>
 </head>
 <body>
+
     <div class="container">
         <header>
             <img src="{{ url_for('static', filename='images/logo.png') }}" alt="Logo">
         </header>
         <h1>Invitees</h1>
         
+        {% for message in get_flashed_messages() %}
+        <div class="alert alert-{{ message[1] }}">{{ message[0] }}</div>
+        {% endfor %}
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <!-- Search Form -->
-        <form method="POST" action="{{ url_for('manage_invitee') }}">
+        <form method="GET" action="{{ url_for('manage_invitee') }}">
+           
             <div class="form-group">
                 <input type="text" name="search" class="form-control" placeholder="Search invitees by QR id or phone number" value="{{ request.args.get('search', '') }}">
             </div>
             <button type="submit" class="btn btn-primary">Search</button>
         </form>
-        
         <div class="table-container">
             <table class="table table-striped">
                 <thead>
@@ -170,6 +175,33 @@
         });
     }
 }
+
+    // Fetch CSRF token from meta tag
+    function markPresent(inviteeId) {
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+    if (confirm('Are you sure you want to Mark this Invitee Present?')) {
+        fetch(`/mark_invitee/${inviteeId}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken  // Add CSRF token to request headers
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                alert('Invitee Marked successfully');
+                window.location.reload();  // Reload the page or update the UI
+            } else {
+                alert('Error: ' + data.message);
+            }
+        })
+        .catch(error => {
+            alert('Error occurred: ' + error);
+        });
+    }
+    }
 
     </script>
 </body>
